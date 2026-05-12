@@ -205,6 +205,13 @@
     }, 1000);
 
     init();
+    if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js')
+      .then(reg => console.log('Fire OS Engine (SW) Active:', reg.scope))
+      .catch(err => console.error('Engine Failure:', err));
+  });
+}
 </script>
 </body>
 </html>
