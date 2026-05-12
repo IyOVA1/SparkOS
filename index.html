@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Fire OS - Nightly Build</title>
+    <style>
+        :root { 
+            --accent: #f97316; 
+            --bg: #0f172a; 
+            --panel: rgba(15, 23, 42, 0.95); 
+            --top-bar: rgba(10, 10, 10, 0.8);
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+        body { font-family: 'Segoe UI', system-ui, sans-serif; background: #000; color: #fff; overflow: hidden; height: 100vh; }
+        
+        /* 1. macOS Style Top Bar */
+        #menu-bar { 
+            height: 28px; background: var(--top-bar); backdrop-filter: blur(15px); 
+            display: flex; align-items: center; padding: 0 15px; font-size: 13px; font-weight: 500;
+            border-bottom: 1px solid rgba(255,255,255,0.1); z-index: 20000;
+        }
+        .menu-item { margin-right: 20px; cursor: pointer; opacity: 0.9; }
+        .menu-item:hover { opacity: 1; }
+        .menu-right { margin-left: auto; display: flex; gap: 15px; }
+
+        #desktop { 
+            width: 100vw; height: calc(100vh - 76px); /* Adjusted for top and bottom bars */
+            position: relative; background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); 
+        }
+        
+        /* 3. Windows Style Taskbar */
+        #taskbar { 
+            height: 48px; background: var(--panel); backdrop-filter: blur(10px); 
+            display: flex; align-items: center; padding: 0 12px; 
+            border-top: 1px solid rgba(255,255,255,0.1); position: absolute; bottom: 0; width: 100%; z-index: 10000; 
+        }
+        #fire-btn { 
+            background: linear-gradient(45deg, #f97316, #ea580c); border: none; border-radius: 8px; 
+            width: 36px; height: 36px; font-size: 20px; cursor: pointer; margin-right: 15px;
+        }
+
+        /* 4. Dynamic Resizable Windows */
+        .window { position: absolute; background: #1e1e2e; border: 1px solid #444; border-radius: 10px; display: flex; flex-direction: column; box-shadow: 0 25px 60px rgba(0,0,0,0.5); overflow: hidden; }
+        .titlebar { height: 36px; background: #2d2d3f; display: flex; align-items: center; padding: 0 12px; cursor: move; }
+        .controls { display: flex; gap: 8px; margin-right: 12px; }
+        .win-btn { width: 12px; height: 12px; border-radius: 50%; border: none; cursor: pointer; }
+        .close { background: #ff5f56; } .min { background: #ffbd2e; } .max { background: #27c93f; }
+        .win-content { flex: 1; background: #fff; position: relative; }
+
+        /* Settings UI */
+        .settings-page { padding: 25px; color: #333; height: 100%; background: #f1f5f9; overflow-y: auto; }
+        .setting-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #e2e8f0; }
+        
+        /* Toggle Switch */
+        .switch { position: relative; display: inline-block; width: 40px; height: 20px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 20px; }
+        input:checked + .slider { background-color: var(--accent); }
+        .slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider:before { transform: translateX(20px); }
+
+        #spark-menu { 
+            position: absolute; bottom: 58px; left: 12px; width: 320px; 
+            background: var(--panel); backdrop-filter: blur(25px); border-radius: 12px; 
+            display: none; flex-direction: column; padding: 20px; border: 1px solid rgba(255,255,255,0.1); 
+        }
+    </style>
+</head>
+<body>
+
+<div id="menu-bar">
+    <div class="menu-item" style="font-weight: 800;">🔥 FireOS</div>
+    <div class="menu-item">File</div>
+    <div class="menu-item">Edit</div>
+    <div class="menu-item">View</div>
+    <div class="menu-right">
+        <span>📶</span>
+        <span>🔋 85%</span>
+        <span id="top-clock"></span>
+    </div>
+</div>
+
+<div id="desktop"></div>
+
+<div id="spark-menu">
+    <h4 style="color: #f97316; margin-bottom: 15px; font-size: 12px;">ALL APPLICATIONS</h4>
+    <div id="app-list"></div>
+</div>
+
+<div id="taskbar">
+    <button id="fire-btn" onclick="toggleSpark()">🔥</button>
+    <div id="running-apps" style="display: flex; gap: 8px;"></div>
+</div>
+
+<script>
+    let db;
+    let topZ = 1000;
+    const sysSettings = { darkMode: true, animations: true, devMode: false, proxyEnabled: true };
+
+    // 5. Pre-installed Apps Config
+    const apps = {
+        browser: { name: 'Browser', icon: '🌐', type: 'sys', url: 'https://www.bing.com' },
+        terminal: { name: 'Terminal', icon: '💻', type: 'sys' },
+        vault: { name: 'Vault', icon: '📁', type: 'sys' },
+        noteraft: { name: 'NoteRaft', icon: '📝', type: 'web', url: 'https://noteraft.lovable.app' },
+        settings: { name: 'Settings', icon: '⚙️', type: 'sys' }
+    };
+
+    function init() {
+        const list = document.getElementById('app-list');
+        Object.keys(apps).forEach(id => {
+            const item = document.createElement('div');
+            item.style.padding = "10px";
+            item.style.cursor = "pointer";
+            item.innerHTML = `${apps[id].icon} ${apps[id].name}`;
+            item.onclick = () => { launch(id); toggleSpark(); };
+            list.appendChild(item);
+        });
+        
+        // Setup DB
+        const req = indexedDB.open("FireOS_Storage", 1);
+        req.onupgradeneeded = (e) => e.target.result.createObjectStore("vault", { keyPath: "id", autoIncrement: true });
+        req.onsuccess = (e) => db = e.target.result;
+    }
+
+    function launch(id) {
+        const app = apps[id];
+        const win = document.createElement('div');
+        win.className = 'window';
+        win.style.width = '800px'; win.style.height = '500px';
+        win.style.left = '100px'; win.style.top = '50px';
+        win.style.zIndex = ++topZ;
+
+        let body = '';
+        if (id === 'settings') {
+            body = `
+                <div class="settings-page">
+                    <h2>System Settings</h2>
+                    <div class="setting-row"><span>Dark Mode</span><label class="switch"><input type="checkbox" checked><span class="slider"></span></label></div>
+                    <div class="setting-row"><span>Hardware Acceleration</span><label class="switch"><input type="checkbox" checked><span class="slider"></span></label></div>
+                    <div class="setting-row"><span>NoteRaft Resource Proxy</span><label class="switch"><input type="checkbox" checked><span class="slider"></span></label></div>
+                    <div class="setting-row"><span>Developer Tools</span><label class="switch"><input type="checkbox"><span class="slider"></span></label></div>
+                    <button style="margin-top:20px; width:100%; padding:10px; background:#ddd; border:none; border-radius:5px;">Check for Updates</button>
+                </div>`;
+        } else if (id === 'browser' || id === 'noteraft') {
+            // Updated Proxy/Sandbox Logic
+            body = `<iframe src="${app.url}" style="width:100%;height:100%;border:none;" sandbox="allow-forms allow-scripts allow-same-origin allow-popups"></iframe>`;
+        } else if (id === 'vault') {
+            body = `<div style="padding:20px; color:#333;"><h3>Vault Storage</h3><p>Local files synchronized via IndexedDB.</p></div>`;
+        } else {
+            body = `<div style="background:#000; color:#0f0; font-family:monospace; padding:15px; height:100%;">FireOS Terminal v1.2<br># root@fireos:~$ </div>`;
+        }
+
+        win.innerHTML = `
+            <div class="titlebar">
+                <div class="controls">
+                    <button class="win-btn close" onclick="this.closest('.window').remove()"></button>
+                    <button class="win-btn min"></button>
+                    <button class="win-btn max"></button>
+                </div>
+                <span class="title-text" style="color:#eee; font-size:12px;">${app.name}</span>
+            </div>
+            <div class="win-content">${body}</div>
+            <div class="resizer" style="width:10px; height:10px; position:absolute; bottom:0; right:0; cursor:se-resize;"></div>`;
+        
+        document.getElementById('desktop').appendChild(win);
+        makeDraggable(win);
+        makeResizable(win);
+    }
+
+    function makeDraggable(el) {
+        const bar = el.querySelector('.titlebar');
+        bar.onmousedown = (e) => {
+            let px = e.clientX - el.offsetLeft;
+            let py = e.clientY - el.offsetTop;
+            document.onmousemove = (e) => {
+                el.style.left = (e.clientX - px) + 'px';
+                el.style.top = (e.clientY - py) + 'px';
+            };
+            document.onmouseup = () => { document.onmousemove = null; };
+        };
+    }
+
+    function makeResizable(el) {
+        const resizer = el.querySelector('.resizer');
+        resizer.onmousedown = (e) => {
+            e.stopPropagation();
+            document.onmousemove = (e) => {
+                el.style.width = (e.clientX - el.offsetLeft) + 'px';
+                el.style.height = (e.clientY - el.offsetTop) + 'px';
+            };
+            document.onmouseup = () => { document.onmousemove = null; };
+        };
+    }
+
+    function toggleSpark() {
+        const m = document.getElementById('spark-menu');
+        m.style.display = m.style.display === 'flex' ? 'none' : 'flex';
+    }
+
+    setInterval(() => {
+        const now = new Date();
+        const time = now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        document.getElementById('top-clock').innerText = time;
+    }, 1000);
+
+    init();
+</script>
+</body>
+</html>
